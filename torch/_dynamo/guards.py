@@ -169,6 +169,7 @@ from .source import (
 )
 from .types import (  # noqa: F401
     CacheEntry,
+    CacheEntryHandle,
     DynamoFrameType,
     ExtraState,
     GuardedCode,
@@ -639,7 +640,7 @@ class GuardManagerWrapper:
                 node.mark_tag_safe_root()
 
     def populate_diff_guard_manager(self) -> None:
-        self.diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)
+        diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)
 
         # Ensure that C++ side points to the updated diff guard manager.
         # When a new GuardManagerWrapper is created, it does not have a
@@ -649,7 +650,8 @@ class GuardManagerWrapper:
         # cache_entry is visible, so we update the C++ side to point to the
         # update guard manager.
         if self.cache_entry:
-            self.cache_entry.update_diff_guard_root_manager()
+            self.cache_entry.update_diff_guard_root_manager(diff_guard_root)
+        self.diff_guard_root = diff_guard_root
 
     def clone_with_chosen_sources(
         self, chosen_sources: OrderedSet[str]
@@ -5476,15 +5478,19 @@ class CheckFunctionManager:
             and (cache_entry := self.guard_manager.cache_entry) is not None
             and (extra_state := self.guard_manager.extra_state) is not None
         ):
-            if not isinstance(cache_entry, CacheEntry):
-                raise AssertionError(f"Expected CacheEntry, got {type(cache_entry)}")
+            if not isinstance(cache_entry, CacheEntryHandle):
+                raise AssertionError(
+                    f"Expected CacheEntryHandle, got {type(cache_entry)}"
+                )
 
             if not isinstance(extra_state, ExtraState):
                 raise AssertionError(f"Expected ExtraState, got {type(extra_state)}")
             reason = f"Cache line invalidated because {obj_str} got deallocated"
             deleted_guard_manager = DeletedGuardManagerWrapper(reason)
 
-            extra_state.invalidate(cache_entry, deleted_guard_manager)
+            extra_state.invalidate(
+                cache_entry, deleted_guard_manager, self.guard_manager
+            )
             self.guard_manager = deleted_guard_manager
 
     def id_ref(self, obj: object, obj_str: str) -> int:
